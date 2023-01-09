@@ -46,7 +46,7 @@
 
 // also we selected the ESP8266 NodeMCU 1.0 (ESP-12E Module) for this project
 // it is also setup to allow OTA Over The Air updates
-// you need to setup a blynk server like I did for this project as blynk no longer supports the legacy version of blynk.
+// you need to setup a blynk server like I did for this project as blynk no longer supports legacy version.
 
 #define BLYNK_PRINT Serial
 
@@ -68,14 +68,20 @@
 
 // You should get Auth Token in the Blynk App.
 // Go to the Project Settings (nut icon).
-char auth[] = "....GYAo";  //blynk project key
+char auth[] = "....GYAo";  //blynk project auth key
+const char* blynk_server = "funtracker.site";
 
 // Update these with values suitable for your network.
-char* ssid[] = {"wifinet1","wifinet2"}; //list of wifi networks
-char* pass[] = {"passwordnet1","passwordnet2"}; //list of passwords
+char* ssid[] = {"wifiNet1","wifiNet2"}; //list of wifi networks
+char* pass[] = {"password1","password2"}; //list of passwords
+
+const char* mqtt_user = "mqtt_username";
+const char* mqtt_password = "mqtt_password";
+
+const char* OTA_password = "OTA_password";
 
 //const char* mqtt_server = "192.168.1.15";
-const char* mqtt_server = "broker.hivemq.com";
+const char* mqtt_server = "mymqttserver.com";
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -126,38 +132,38 @@ void myTimerEvent(){
 
 void mqtt_set(int state){
   if (state == 0){
-    // tasmota_xxxx should be changed to your random values to prevent others controling your devices
-    client.publish("cmnd/tasmota_xxxx/POWER", "false");
+    // the cmnd string will need to be changed to match what you set in your mqtt device
+    client.publish("cmnd/sonoff/POWER", "false");
     Serial.println("mqtt_set off");
   }else{
-    client.publish("cmnd/stasmota_xxxx/POWER", "true");
+    client.publish("cmnd/sonoff/POWER", "true");
     Serial.println("mqtt_set on");
   }
 }
 
-// manual togle power botton
+// manual togle power botton in blynk app
 BLYNK_WRITE(V2){
   ledstate = !ledstate;
   mqtt_set(ledstate);
 }
 
-//  used  to get voltage calibration factor entry from app
+//  used  to get voltage calibration factor entry from blynk app
 BLYNK_WRITE(V3){
-  // v3 returns calfactor entry to apply if default is not good enough
+  // v3 returns calfactor entry to apply if default is not good enough for you, when you find what you need you can later program it as default
   calfactor = param.asFloat();
 }
 
 BLYNK_WRITE(V4){
-  // v4 returns min voltage entry to apply to override default
+  // v4 returns min voltage entry to apply to override default from blynk app
   min_voltage = param.asFloat();
 }
 
 BLYNK_WRITE(V5){
-  // v5 returns recover voltage entry to apply to override default
+  // v5 returns recover voltage entry to apply to override default from blynk app
   recover_voltage = param.asFloat();
 }
 
-
+// to get out some of the random noise seen on adc pin we take many samples
 float get_average_adc(int pin){
    int measurings=0;
    int samples = 30;
@@ -170,6 +176,7 @@ float get_average_adc(int pin){
     return av;   
 }
 
+// this just takes the value recieved from adc and converts it to what should be voltage in volts 
 float adc_to_volt( float av){
    float voltage = VREF / 1024.0 * av;  
    return voltage; 
@@ -193,13 +200,12 @@ void reconnect() {
     String clientId = "ESP8266Client-";
     clientId += String(random(0xffff), HEX);
     // Attempt to connect
-    if (client.connect(clientId.c_str())) {
+    if (client.connect(clientId.c_str(),mqtt_user,mqtt_password)) {
       Serial.println("connected");
       // Once connected, publish an announcement...
       client.publish("outTopicTest", "hello world");
       // ... and resubscribe
-     // again this name tasmota_xxxx must be changed to your devices random name
-      client.subscribe("stat/tasmota_xxxx/POWER");
+      client.subscribe("stat/sonoff/POWER");
     } else {
       Serial.print("failed, rc=");
       Serial.print(client.state());
@@ -219,16 +225,18 @@ void setup()
   pinMode(A0, INPUT);
 
   MultyWiFiBlynkBegin(); //instead Blynk.begin(auth, ssid, pass);  
-
+  // set defaults in blynk app
   Blynk.virtualWrite(V3,calfactor);
   Blynk.virtualWrite(V4, min_voltage); 
   Blynk.virtualWrite(V5, recover_voltage); 
 
+  // might want to change your mqtt port setting here but 1883 is standard default for non encrypted
   client.setServer(mqtt_server, 1883);
   client.setCallback(callback);
  
-  ArduinoOTA.setHostname("blynk_voltmeter2");
-  ArduinoOTA.setPassword("passwordOTA");
+  // setup of Over The Air firmware flash update
+  ArduinoOTA.setHostname("blynk_voltmeter");
+  ArduinoOTA.setPassword(OTA_password);
   ArduinoOTA.onStart([]() {
     String type;
     if (ArduinoOTA.getCommand() == U_FLASH) {
@@ -303,8 +311,8 @@ void MultyWiFiBlynkBegin() {
     }
     if (WiFi.status() == WL_CONNECTED) {
       Serial.println("Connected to WiFi! Now I will check the connection to the Blynk server");
-      // this name must be changed to match your blynk server name
-      Blynk.config(auth,"yourblynkserver.com", 8080);
+      Blynk.config(auth,blynk_server, 8080);
+      //Blynk.begin(auth, ssid, pass, "www.funtracker.site", 8080);
       Blynk.connect(10000); //waiting 10 sec
     }
     ++ssid_count; 
@@ -317,8 +325,8 @@ void MultyWiFiBlynkBegin() {
 
 
 void reset_wifi_notconnect(){
-  if (WiFi.status() != WL_CONNECTED){
-    Serial.println("detected wifi desconnect will reset esp");
+  if (!Blynk.connected()){
+    Serial.println("detected blynk server desconnect will reset esp");
     ESP.restart();
   }
 }
